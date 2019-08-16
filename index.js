@@ -144,6 +144,7 @@ bot.on('new_chat_members', async (ctx) => {
               reply_to_message_id: context.message.message_id,
             },
           );
+          await redis.del(`app:tg-captcha:chat:${userId}:user:${chatId}`)
 
           handleDeleteMessage(context, replyAnswerMessage);
         }
