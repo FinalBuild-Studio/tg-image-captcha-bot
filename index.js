@@ -139,7 +139,7 @@ bot.on('new_chat_members', async (ctx) => {
           await context.kickChatMember(userId);
 
           const replyAnswerMessage = await context.reply(
-            '❌ 因為超過30秒回答，所以牧羊犬把你吃掉了',
+            '❌ 因為超過180秒回答，所以牧羊犬把你吃掉了',
             {
               reply_to_message_id: context.message.message_id,
             },
