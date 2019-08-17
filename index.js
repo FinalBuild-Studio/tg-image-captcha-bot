@@ -62,7 +62,7 @@ bot.on('new_chat_members', async (ctx) => {
       },
     );
 
-    const messages = await redis.smembers(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}`);
+    const messages = await redis.smembers(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}:messages`);
 
     await Promise
       .all(
@@ -255,9 +255,9 @@ bot.action(/.+/, async (ctx) => {
 
 bot.on('message', async (ctx) => {
   const userId = _.get(ctx, 'message.from.id');
-  const messageId = _.get(ctx, 'message_id');
+  const messageId = _.get(ctx, 'message.message_id');
   const chatId = _.get(ctx, 'chat.id');
-  const key = `app:tg-captcha:chat:${chatId}:user:${userId}`;
+  const key = `app:tg-captcha:chat:${chatId}:user:${userId}:messages`;
 
   await redis
     .pipeline()
