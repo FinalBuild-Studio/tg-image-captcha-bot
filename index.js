@@ -33,125 +33,163 @@ const handleDeleteMessage = (ctx, replyAnswerMessage) => {
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 bot.on('new_chat_members', async (ctx) => {
-  const name = `${_.get(ctx, 'from.first_name', '')} ${_.get(ctx, 'from.last_name', '')}`.trim();
+  const newChatMember = _.get(ctx, 'message.new_chat_member');
+  const newChatMemberId = _.get(newChatMember, 'id');
+  const firstName = _.get(newChatMember, 'first_name', '');
+  const lastName = _.get(newChatMember, 'last_name', '');
+  const user = _.get(ctx, 'from');
+  const userId = _.get(user, 'id');
+  const chat = _.get(ctx, 'chat');
+  const chatId = _.get(chat, 'id');
+  const name = `${firstName} ${lastName}`.trim();
 
-  await ctx.telegram.callApi(
-    'restrictChatMember',
-    {
-      chat_id: ctx.chat.id,
-      user_id: ctx.from.id,
-      permissions: {
-        can_send_messages: false,
-        can_send_media_messages: false,
-        can_send_polls: false,
-        can_send_other_messages: false,
-        can_add_web_page_previews: false,
-        can_change_info: false,
-        can_invite_users: false,
-        can_pin_messages: false,
+  if (userId === newChatMemberId) {
+    await ctx.telegram.callApi(
+      'restrictChatMember',
+      {
+        chat_id: chatId,
+        user_id: newChatMemberId,
+        permissions: {
+          can_send_messages: false,
+          can_send_media_messages: false,
+          can_send_polls: false,
+          can_send_other_messages: false,
+          can_add_web_page_previews: false,
+          can_change_info: false,
+          can_invite_users: false,
+          can_pin_messages: false,
+        },
       },
-    },
-  );
+    );
 
-  const formula = (
-    [
-      numberA,
-      operatorA,
-      numberB,
-      operatorB,
-      numberC,
-    ],
-  ) => {
-    const gen = genfun();
+    const messages = await redis.smembers(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}`);
 
-    gen(`
+    await Promise
+      .all(
+        messages
+          .map(
+            (messageId) => ctx.deleteMessage(messageId),
+          ),
+      );
+
+    const formula = (
+      [
+        numberA,
+        operatorA,
+        numberB,
+        operatorB,
+        numberC,
+      ],
+    ) => {
+      const gen = genfun();
+
+      gen(`
       function () {
         return ${d(numberA)} ${operatorA} ${d(numberB)} ${operatorB} ${d(numberC)};
       }
     `);
 
-    return gen.toFunction();
-  };
+      return gen.toFunction();
+    };
 
-  const questions = Array(3)
-    .fill()
-    .map(() => {
-      const polyfill = Array(5)
-        .fill()
-        .reduce(
-          (current, value, index) => {
-            const operators = [
-              '+',
-              '-',
-              '*',
-            ];
+    const calculateTotalCache = [];
+    const questions = Array(3)
+      .fill()
+      .map(() => {
+        const getRandomNumber = () => {
+          const randomNumber = Array(5)
+            .fill()
+            .reduce(
+              (current, value, index) => {
+                const operators = [
+                  '+',
+                  '-',
+                  '*',
+                ];
 
-            if (index % 2 === 0) {
-              current.push(_.random(0, 99));
-            } else {
-              current.push(operators[_.random(0, operators.length - 1)]);
-            }
+                if (index % 2 === 0) {
+                  current.push(_.random(0, 99));
+                } else {
+                  current.push(operators[_.random(0, operators.length - 1)]);
+                }
 
-            return current;
-          },
-          [],
-        );
+                return current;
+              },
+              [],
+            );
 
-      return {
-        polyfill,
-        hash: md5(`${dayjs().valueOf()}${_.random(0, 100)}`),
-      };
-    });
+          const total = formula(randomNumber)();
 
-  const answer = questions[_.random(0, questions.length - 1)];
+          if (calculateTotalCache.includes(total)) {
+            return getRandomNumber();
+          }
 
-  await redis.set(`app:tg-captcha:chat:${ctx.chat.id}:user:${ctx.from.id}`, answer.hash);
-  const replyQuestionMessage = await ctx.replyWithPhoto(
-    {
-      source: await sharp(Buffer.from(captcha(answer.polyfill.join(' '))))
-        .flatten({ background: '#ffffff' })
-        .resize(800)
-        .toFormat('jpg')
-        .toBuffer(),
-    },
-    {
-      reply_markup: Markup.inlineKeyboard(
-        questions.map(
-          (question) => Markup.callbackButton(formula(question.polyfill)(), question.hash),
+          calculateTotalCache.push(total);
+
+          return {
+            total,
+            formula: randomNumber,
+          };
+        };
+
+        const hash = md5(`${dayjs().valueOf()}${_.random(0, 100)}`);
+
+        return {
+          randomNumber: getRandomNumber(),
+          hash,
+        };
+      });
+
+    const answer = questions[_.random(0, questions.length - 1)];
+
+    await redis.set(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}`, answer.hash);
+    const replyQuestionMessage = await ctx.replyWithPhoto(
+      {
+        source: await sharp(Buffer.from(captcha(answer.randomNumber.formula.join(' '))))
+          .flatten({ background: '#ffffff' })
+          .resize(800)
+          .toFormat('jpg')
+          .toBuffer(),
+      },
+      {
+        reply_markup: Markup.inlineKeyboard(
+          questions.map(
+            (question) => Markup.callbackButton(question.randomNumber.total, question.hash),
+          ),
         ),
-      ),
-      caption: `👏 歡迎新使用者 ${name}，請在180秒內回答圖片的問題，否則牧羊犬會趕你出去喔 🐶`,
-      reply_to_message_id: ctx.message.message_id,
-    },
-  );
+        caption: `👏 歡迎新使用者 ${name}，請在180秒內回答圖片的問題，否則牧羊犬會趕你出去喔 🐶`,
+        reply_to_message_id: ctx.message.message_id,
+      },
+    );
 
-  setTimeout(
-    (
-      (context, replyQuestionMessageContext) => async () => {
-        const userId = _.get(context, 'from.id');
-        const chatId = _.get(context, 'chat.id');
-        const userQuestionReplyMessageId = _.get(replyQuestionMessageContext, 'message_id');
+    setTimeout(
+      (
+        (context, replyQuestionMessageContext) => async () => {
+          const requestUserId = _.get(context, 'message.new_chat_member');
+          const requestChatId = _.get(context, 'chat.id');
+          const userQuestionReplyMessageId = _.get(replyQuestionMessageContext, 'message_id');
 
-        await context.deleteMessage(userQuestionReplyMessageId);
-        const hash = await redis.get(`app:tg-captcha:chat:${userId}:user:${chatId}`);
+          await context.deleteMessage(userQuestionReplyMessageId);
+          const hash = await redis.get(`app:tg-captcha:chat:${requestUserId}:user:${requestChatId}`);
 
-        if (hash) {
-          await context.kickChatMember(userId);
+          if (hash) {
+            await context.kickChatMember(requestUserId);
 
-          const replyAnswerMessage = await context.reply(
-            '❌ 因為超過180秒回答，所以牧羊犬把你吃掉了',
-            {
-              reply_to_message_id: context.message.message_id,
-            },
-          );
-          await redis.del(`app:tg-captcha:chat:${userId}:user:${chatId}`)
+            const replyAnswerMessage = await context.reply(
+              '❌ 因為超過180秒回答，所以牧羊犬把你吃掉了',
+              {
+                reply_to_message_id: context.message.message_id,
+              },
+            );
+            await redis.del(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`);
 
-          handleDeleteMessage(context, replyAnswerMessage);
+            handleDeleteMessage(context, replyAnswerMessage);
+          }
         }
-      }
-    )(ctx, replyQuestionMessage),
-    180000,
-  );
+      )(ctx, replyQuestionMessage),
+      180000,
+    );
+  }
 });
 
 bot.action(/.+/, async (ctx) => {
@@ -213,6 +251,19 @@ bot.action(/.+/, async (ctx) => {
 
     handleDeleteMessage(ctx, replyAnswerMessage);
   }
+});
+
+bot.on('message', async (ctx) => {
+  const userId = _.get(ctx, 'message.from.id');
+  const messageId = _.get(ctx, 'message_id');
+  const chatId = _.get(ctx, 'chat.id');
+  const key = `app:tg-captcha:chat:${chatId}:user:${userId}`;
+
+  await redis
+    .pipeline()
+    .sadd(key, messageId)
+    .expire(key, 60)
+    .exec();
 });
 
 bot.catch(console.log);
