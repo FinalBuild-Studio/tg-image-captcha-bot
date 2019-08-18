@@ -153,9 +153,17 @@ bot.on('new_chat_members', async (ctx) => {
       },
       {
         reply_markup: Markup.inlineKeyboard(
-          questions.map(
-            (question) => Markup.callbackButton(question.randomNumber.total, question.hash),
-          ),
+          [
+            questions.map(
+              (question) => Markup.callbackButton(question.randomNumber.total, question.hash),
+            ),
+            [
+              Markup.urlButton('💗 捐款給牧羊犬 💗', 'https://storage.googleapis.com/static-capslock/donate/index.html'),
+            ],
+          ],
+          {
+            columns: 2,
+          },
         ),
         caption: `👏 歡迎新使用者 ${name}，請在180秒內回答圖片的問題，否則牧羊犬會趕你出去喔 🐶`,
         reply_to_message_id: ctx.message.message_id,
