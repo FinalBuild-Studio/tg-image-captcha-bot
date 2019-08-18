@@ -158,7 +158,7 @@ bot.on('new_chat_members', async (ctx) => {
               (question) => Markup.callbackButton(question.randomNumber.total, question.hash),
             ),
             [
-              Markup.urlButton('💗 捐款給牧羊犬 💗', 'https://storage.googleapis.com/static-capslock/donate/index.html'),
+              Markup.urlButton('💗 捐款給牧羊犬 💗', 'https://shorturl.at/aKQ34'),
             ],
           ],
           {
