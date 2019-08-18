@@ -64,13 +64,13 @@ bot.on('new_chat_members', async (ctx) => {
 
     const messages = await redis.smembers(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}:messages`);
 
-    await Promise
-      .all(
-        messages
-          .map(
-            (messageId) => ctx.deleteMessage(messageId),
-          ),
-      );
+    await Promise.all(
+      messages
+        .filter(Boolean)
+        .map(
+          (messageId) => ctx.deleteMessage(messageId),
+        ),
+    );
 
     const formula = (
       [
@@ -255,15 +255,18 @@ bot.action(/.+/, async (ctx) => {
 
 bot.on('message', async (ctx) => {
   const userId = _.get(ctx, 'message.from.id');
+  const text = _.get(ctx, 'message.text');
   const messageId = _.get(ctx, 'message.message_id');
   const chatId = _.get(ctx, 'chat.id');
   const key = `app:tg-captcha:chat:${chatId}:user:${userId}:messages`;
 
-  await redis
-    .pipeline()
-    .sadd(key, messageId)
-    .expire(key, 60)
-    .exec();
+  if (text) {
+    await redis
+      .pipeline()
+      .sadd(key, messageId)
+      .expire(key, 60)
+      .exec();
+  }
 });
 
 bot.catch(console.log);
