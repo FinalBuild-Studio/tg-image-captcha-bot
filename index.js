@@ -173,12 +173,12 @@ bot.on('new_chat_members', async (ctx) => {
     setTimeout(
       (
         (context, replyQuestionMessageContext) => async () => {
-          const requestUserId = _.get(context, 'message.new_chat_member');
+          const requestUserId = _.get(context, 'message.new_chat_member.id');
           const requestChatId = _.get(context, 'chat.id');
           const userQuestionReplyMessageId = _.get(replyQuestionMessageContext, 'message_id');
 
           await context.deleteMessage(userQuestionReplyMessageId);
-          const hash = await redis.get(`app:tg-captcha:chat:${requestUserId}:user:${requestChatId}`);
+          const hash = await redis.get(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`);
 
           if (hash) {
             await context.kickChatMember(requestUserId);
