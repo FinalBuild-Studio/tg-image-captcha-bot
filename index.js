@@ -23,7 +23,7 @@ const handleDeleteMessage = (ctx, replyAnswerMessage) => {
       (context, replyAnswerMessageContext) => () => {
         const userReplyMessageId = _.get(replyAnswerMessageContext, 'message_id');
 
-        context.deleteMessage(userReplyMessageId);
+        context.deleteMessage(userReplyMessageId).catch(console.log);
       }
     )(ctx, replyAnswerMessage),
     30000,
@@ -68,7 +68,7 @@ bot.on('new_chat_members', async (ctx) => {
       messages
         .filter(Boolean)
         .map(
-          (messageId) => ctx.deleteMessage(messageId),
+          (messageId) => ctx.deleteMessage(messageId).catch(console.log),
         ),
     );
 
@@ -179,7 +179,7 @@ bot.on('new_chat_members', async (ctx) => {
           const requestChatId = _.get(context, 'chat.id');
           const userQuestionReplyMessageId = _.get(replyQuestionMessageContext, 'message_id');
 
-          await context.deleteMessage(userQuestionReplyMessageId);
+          await context.deleteMessage(userQuestionReplyMessageId).catch(console.log);
           const hash = await redis.get(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`);
 
           if (hash) {
@@ -220,7 +220,7 @@ bot.action(/.+/, async (ctx) => {
   if (userId !== challengeId) {
     ctx.answerCbQuery('這不是你的按鈕，請不要亂點 😠');
   } else if (captchaAnswer === inlineButton) {
-    await ctx.deleteMessage(messageId);
+    await ctx.deleteMessage(messageId).catch(console.log);
 
     replyAnswerMessage = await ctx.reply(
       '⭕️ 恭喜回答正確，牧羊犬歡迎你的加入~',
