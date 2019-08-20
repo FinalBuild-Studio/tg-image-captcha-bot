@@ -158,7 +158,7 @@ bot.on('new_chat_members', async (ctx) => {
               (question) => Markup.callbackButton(question.randomNumber.total, question.hash),
             ),
             [
-              Markup.urlButton('💗 捐款給牧羊犬 💗', 'https://shorturl.at/aKQ34'),
+              Markup.urlButton('💗 捐款給牧羊犬 💗', 'http://bit.ly/31POewi'),
             ],
           ],
           {
@@ -169,6 +169,8 @@ bot.on('new_chat_members', async (ctx) => {
         reply_to_message_id: ctx.message.message_id,
       },
     );
+
+    await redis.set(`app:tg-captcha:chat:${chatId}:challenge:${replyQuestionMessage.message_id}`, userId);
 
     setTimeout(
       (
@@ -205,9 +207,10 @@ bot.action(/.+/, async (ctx) => {
   const chatId = _.get(ctx, 'chat.id');
   const callback = _.get(ctx, 'update.callback_query.message');
   const messageId = _.get(callback, 'message_id');
+  const storedChallengeId = await redis.get(`app:tg-captcha:chat:${chatId}:challenge:${messageId}`);
   const replyMessage = _.get(callback, 'reply_to_message');
   const replyMessageId = _.get(replyMessage, 'message_id');
-  const challengeId = _.get(replyMessage, 'new_chat_member.id');
+  const challengeId = _.get(replyMessage, 'new_chat_member.id', storedChallengeId);
   const [inlineButton] = _.get(ctx, 'match', []);
 
   let replyAnswerMessage = null;
