@@ -210,7 +210,7 @@ bot.action(/.+/, async (ctx) => {
   const storedChallengeId = await redis.get(`app:tg-captcha:chat:${chatId}:challenge:${messageId}`);
   const replyMessage = _.get(callback, 'reply_to_message');
   const replyMessageId = _.get(replyMessage, 'message_id');
-  const challengeId = _.get(replyMessage, 'new_chat_member.id', storedChallengeId);
+  const challengeId = _.get(replyMessage, 'new_chat_member.id', _.toNumber(storedChallengeId));
   const [inlineButton] = _.get(ctx, 'match', []);
 
   let replyAnswerMessage = null;
@@ -247,6 +247,8 @@ bot.action(/.+/, async (ctx) => {
       },
     );
   } else {
+    await ctx.deleteMessage(messageId).catch(console.log);
+
     replyAnswerMessage = await ctx.reply(
       '❌ 回答失敗，所以牧羊犬把你吃掉了',
       {
@@ -264,7 +266,7 @@ bot.action(/.+/, async (ctx) => {
   }
 });
 
-bot.on('message', async (ctx) => {
+bot.on('message', async (ctx, next) => {
   const userId = _.get(ctx, 'message.from.id');
   const text = _.get(ctx, 'message.text');
   const messageId = _.get(ctx, 'message.message_id');
@@ -278,8 +280,25 @@ bot.on('message', async (ctx) => {
       .expire(key, 60)
       .exec();
   }
+
+  if (/^\//.test(text)) {
+    await next();
+  }
+});
+
+bot.command('about', (ctx) => {
+  ctx.reply(`牧羊犬是一個免費的防spam的bot，本身沒有任何贊助以及金援，全部的成本都是由開發者自行吸收。
+從一開始的百人小群起家，到現在活躍在140個以上的群組，都感謝有各位的支持才能到現在。
+但是，現在由於主機價格上漲，機器人的負擔也越來越加重，甚至未來可能會出現一年250 - 260美金以上的帳單... 作為業餘項目來說，這已經是個不小的負擔。
+如果你希望牧羊犬能走的更久，可以的話請多多支持我能再把機器開下去，感謝 🙏
+
+歡迎樂捐，所有捐款人會在這裡留下您的名字
+
+贊助名單:
+@Lunamiou 🐑
+@tfnight 二十四夜
+Chung Wu`);
 });
 
 bot.catch(console.log);
-
 bot.launch();
