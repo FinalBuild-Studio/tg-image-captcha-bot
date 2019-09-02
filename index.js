@@ -22,8 +22,10 @@ const handleDeleteMessage = (ctx, replyAnswerMessage) => {
     (
       (context, replyAnswerMessageContext) => () => {
         const userReplyMessageId = _.get(replyAnswerMessageContext, 'message_id');
+        const userReplyToMessageId = _.get(replyAnswerMessageContext, 'reply_to_message.message_id');
 
         context.deleteMessage(userReplyMessageId).catch(console.log);
+        context.deleteMessage(userReplyToMessageId).catch(console.log);
       }
     )(ctx, replyAnswerMessage),
     30000,
