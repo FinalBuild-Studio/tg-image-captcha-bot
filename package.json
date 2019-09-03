@@ -1,6 +1,6 @@
 {
 	"scripts": {
-		"start": "node index.js"
+		"start": "node server.js"
 	},
 	"dependencies": {
 		"dayjs": "^1.8.15",
