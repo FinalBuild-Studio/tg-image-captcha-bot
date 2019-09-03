@@ -262,32 +262,6 @@ bot
       handleDeleteMessage(ctx, replyAnswerMessage);
     }
   })
-  .command('ban', async (ctx) => {
-    const [muteMinutes = 0] = _.get(ctx, 'state.command.splitArgs', []);
-    const admins = await ctx.getChatAdministrators();
-    const adminId = admins.map((admin) => admin.user.id);
-    const minutes = _.toInteger(muteMinutes);
-
-    if (adminId.includes(ctx.from.id)) {
-      const userId = _.get(ctx, 'message.reply_to_message.from.id');
-
-      if (userId) {
-        await ctx.kickChatMember(
-          userId,
-          Math.round(dayjs().add(minutes, 'minute').valueOf() / 1000),
-        );
-
-        const firstName = _.get(ctx, 'message.reply_to_message.from.first_name', '');
-        const lastName = _.get(ctx, 'message.reply_to_message.from.last_name', '');
-
-        await ctx.reply(`已經將${firstName} ${lastName}${minutes === 0 ? '封鎖' : `封鎖 ${minutes} 分鐘`}`);
-      } else {
-        const message = await ctx.reply('請利用回覆的方式指定要封鎖的人');
-
-        handleDeleteMessage(ctx, message);
-      }
-    }
-  })
   .command('admin', async (ctx) => {
     const [group] = _.get(ctx, 'state.command.splitArgs', []);
 
@@ -334,6 +308,71 @@ Chung Wu`);
     }
 
     await next();
+  })
+  .on('message', async (ctx, next) => {
+    const admins = await ctx.getChatAdministrators();
+    const adminId = admins.map((admin) => admin.user.id);
+
+    if (adminId.includes(ctx.from.id)) {
+      await next();
+    }
+  })
+  .command('ban', async (ctx) => {
+    const [muteMinutes = 0] = _.get(ctx, 'state.command.splitArgs', []);
+    const minutes = _.toInteger(muteMinutes);
+
+    const userId = _.get(ctx, 'message.reply_to_message.from.id');
+
+    if (userId) {
+      await ctx.kickChatMember(
+        userId,
+        Math.round(dayjs().add(minutes, 'minute').valueOf() / 1000),
+      );
+
+      const firstName = _.get(ctx, 'message.reply_to_message.from.first_name', '');
+      const lastName = _.get(ctx, 'message.reply_to_message.from.last_name', '');
+
+      await ctx.reply(`已經將${firstName} ${lastName}${minutes === 0 ? '封鎖' : `封鎖 ${minutes} 分鐘`}`);
+    } else {
+      const message = await ctx.reply('請利用回覆的方式指定要封鎖的人');
+
+      handleDeleteMessage(ctx, message);
+    }
+  })
+  .command('mute', async (ctx) => {
+    const [muteMinutes = 5] = _.get(ctx, 'state.command.splitArgs', []);
+    const minutes = _.toInteger(muteMinutes);
+
+    const userId = _.get(ctx, 'message.reply_to_message.from.id');
+
+    if (userId) {
+      await ctx.telegram.callApi(
+        'restrictChatMember',
+        {
+          chat_id: ctx.chat.id,
+          user_id: userId,
+          permissions: {
+            can_send_messages: false,
+            can_send_media_messages: false,
+            can_send_polls: false,
+            can_send_other_messages: false,
+            can_add_web_page_previews: false,
+            can_change_info: false,
+            can_invite_users: false,
+            can_pin_messages: false,
+          },
+          until_date: Math.round(dayjs().add(minutes, 'minute').valueOf() / 1000),
+        },
+      );
+      const firstName = _.get(ctx, 'message.reply_to_message.from.first_name', '');
+      const lastName = _.get(ctx, 'message.reply_to_message.from.last_name', '');
+
+      await ctx.reply(`已經將${firstName} ${lastName}禁言 ${minutes} 分鐘`);
+    } else {
+      const message = await ctx.reply('請利用回覆的方式指定要禁言的人');
+
+      handleDeleteMessage(ctx, message);
+    }
   })
   .catch(console.log)
   .launch();
