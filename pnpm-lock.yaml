@@ -7,6 +7,7 @@ dependencies:
   sharp: 0.23.0
   svg-captcha: 1.4.0
   telegraf: 3.32.0
+  telegraf-command-parts: 1.0.3
 devDependencies:
   eslint: 6.1.0
   eslint-config-airbnb: 18.0.1_d8790b8c668c93ed9c73ecfe7af46a6d
@@ -1714,6 +1715,12 @@ packages:
       node: '>=4.5'
     resolution:
       integrity: sha512-g2SVs5QIxvo6OLp0GudTqEf05maawKUxXru104iaayWA09551tFCTI8f1Asb4lPfkBr91k07iL4c11XO3/b0tA==
+  /telegraf-command-parts/1.0.3:
+    dependencies:
+      telegraf: 3.32.0
+    dev: false
+    resolution:
+      integrity: sha1-0OB40Qzj9oRptSnl6jp25C1XiLM=
   /telegraf/3.32.0:
     dependencies:
       '@types/node': 12.7.2
@@ -1854,3 +1861,4 @@ specifiers:
   sharp: ^0.23.0
   svg-captcha: ^1.4.0
   telegraf: ^3.32.0
+  telegraf-command-parts: ^1.0.3

@@ -7,6 +7,7 @@ const dayjs = require('dayjs');
 const Markup = require('telegraf/markup');
 const genfun = require('generate-function');
 const Redis = require('ioredis');
+const telegrafCommandParts = require('telegraf-command-parts');
 
 const redis = new Redis(
   {
@@ -33,6 +34,8 @@ const handleDeleteMessage = (ctx, replyAnswerMessage) => {
 };
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
+
+bot.use(telegrafCommandParts());
 
 bot.on('new_chat_members', async (ctx) => {
   const newChatMember = _.get(ctx, 'message.new_chat_member');
@@ -268,6 +271,38 @@ bot.action(/.+/, async (ctx) => {
   }
 });
 
+bot.command('admin', async (ctx) => {
+  const [group] = _.get(ctx, 'state.command.splitArgs', []);
+
+  const admins = await ctx.telegram.getChatAdministrators(group);
+
+  const groupAdmins = admins
+    .filter(admin => !admin.user.is_bot)
+    .map((admin) => {
+      if (admin.user.username) {
+        return `@${admin.user.username}`;
+      }
+
+      return `[${admin.user.first_name} ${admin.user.last_name}](tg://user?id=${admin.user.id})`
+    });
+
+  await ctx.replyWithMarkdown(groupAdmins.join('\n'));
+});
+
+bot.command('about', (ctx) => {
+  ctx.reply(`牧羊犬是一個免費的防spam的bot，本身沒有任何贊助以及金援，全部的成本都是由開發者自行吸收。
+從一開始的百人小群起家，到現在活躍在140個以上的群組，都感謝有各位的支持才能到現在。
+但是，現在由於主機價格上漲，機器人的負擔也越來越加重，甚至未來可能會出現一年250 - 260美金以上的帳單... 作為業餘項目來說，這已經是個不小的負擔。
+如果你希望牧羊犬能走的更久，可以的話請多多支持我能再把機器開下去，感謝 🙏
+
+歡迎樂捐，所有捐款人會在這裡留下您的名字
+
+贊助名單:
+@Lunamiou 🐑
+@tfnight 二十四夜
+Chung Wu`);
+});
+
 bot.on('message', async (ctx, next) => {
   const userId = _.get(ctx, 'message.from.id');
   const text = _.get(ctx, 'message.text');
@@ -283,23 +318,7 @@ bot.on('message', async (ctx, next) => {
       .exec();
   }
 
-  if (/^\//.test(text)) {
-    await next();
-  }
-});
-
-bot.command('about', (ctx) => {
-  ctx.reply(`牧羊犬是一個免費的防spam的bot，本身沒有任何贊助以及金援，全部的成本都是由開發者自行吸收。
-從一開始的百人小群起家，到現在活躍在140個以上的群組，都感謝有各位的支持才能到現在。
-但是，現在由於主機價格上漲，機器人的負擔也越來越加重，甚至未來可能會出現一年250 - 260美金以上的帳單... 作為業餘項目來說，這已經是個不小的負擔。
-如果你希望牧羊犬能走的更久，可以的話請多多支持我能再把機器開下去，感謝 🙏
-
-歡迎樂捐，所有捐款人會在這裡留下您的名字
-
-贊助名單:
-@Lunamiou 🐑
-@tfnight 二十四夜
-Chung Wu`);
+  await next();
 });
 
 bot.catch(console.log);
