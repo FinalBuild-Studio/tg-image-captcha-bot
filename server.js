@@ -367,7 +367,7 @@ Chung Wu`);
       const firstName = _.get(ctx, 'message.reply_to_message.from.first_name', '');
       const lastName = _.get(ctx, 'message.reply_to_message.from.last_name', '');
 
-      await ctx.reply(`已經將${firstName} ${lastName}禁言 ${minutes} 分鐘`);
+      await ctx.reply(`已經將${firstName} ${lastName}${minutes === 0 ? '禁言' : `禁言${minutes}分鐘`}`);
     } else {
       const message = await ctx.reply('請利用回覆的方式指定要禁言的人');
 
