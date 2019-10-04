@@ -13,16 +13,16 @@ const { d } = genfun.formats;
 
 const handleDeleteMessage = (ctx, replyAnswerMessage) => {
   setTimeout(
-    (
-      (context, replyAnswerMessageContext) => () => {
-        const userReplyMessageId = _.get(replyAnswerMessageContext, 'message_id');
-        const userReplyToMessageId = _.get(replyAnswerMessageContext, 'reply_to_message.message_id');
+    (context, replyAnswerMessageContext) => () => {
+      const userReplyMessageId = _.get(replyAnswerMessageContext, 'message_id');
+      const userReplyToMessageId = _.get(replyAnswerMessageContext, 'reply_to_message.message_id');
 
-        context.deleteMessage(userReplyMessageId).catch(console.log);
-        context.deleteMessage(userReplyToMessageId).catch(console.log);
-      }
-    )(ctx, replyAnswerMessage),
+      context.deleteMessage(userReplyMessageId).catch(console.log);
+      context.deleteMessage(userReplyToMessageId).catch(console.log);
+    },
     30000,
+    ctx,
+    replyAnswerMessage,
   );
 };
 
@@ -171,31 +171,31 @@ bot
       await redis.set(`app:tg-captcha:chat:${chatId}:challenge:${replyQuestionMessage.message_id}`, userId);
 
       setTimeout(
-        (
-          (context, replyQuestionMessageContext) => async () => {
-            const requestUserId = _.get(context, 'message.new_chat_member.id');
-            const requestChatId = _.get(context, 'chat.id');
-            const userQuestionReplyMessageId = _.get(replyQuestionMessageContext, 'message_id');
+        (context, replyQuestionMessageContext) => async () => {
+          const requestUserId = _.get(context, 'message.new_chat_member.id');
+          const requestChatId = _.get(context, 'chat.id');
+          const userQuestionReplyMessageId = _.get(replyQuestionMessageContext, 'message_id');
 
-            await context.deleteMessage(userQuestionReplyMessageId).catch(console.log);
-            const hash = await redis.get(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`);
+          await context.deleteMessage(userQuestionReplyMessageId).catch(console.log);
+          const hash = await redis.get(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`);
 
-            if (hash) {
-              await context.kickChatMember(requestUserId);
+          if (hash) {
+            await context.kickChatMember(requestUserId);
 
-              const replyAnswerMessage = await context.reply(
-                '❌ 因為超過180秒回答，所以牧羊犬把你吃掉了',
-                {
-                  reply_to_message_id: context.message.message_id,
-                },
-              );
-              await redis.del(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`);
+            const replyAnswerMessage = await context.reply(
+              '❌ 因為超過180秒回答，所以牧羊犬把你吃掉了',
+              {
+                reply_to_message_id: context.message.message_id,
+              },
+            );
+            await redis.del(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`);
 
-              handleDeleteMessage(context, replyAnswerMessage);
-            }
+            handleDeleteMessage(context, replyAnswerMessage);
           }
-        )(ctx, replyQuestionMessage),
+        },
         180000,
+        ctx,
+        replyQuestionMessage,
       );
     }
   })
