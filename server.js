@@ -14,11 +14,11 @@ const { d } = genfun.formats;
 const handleDeleteMessage = (ctx, replyAnswerMessage) => {
   setTimeout(
     (context, replyAnswerMessageContext) => () => {
-      const userReplyMessageId = _.get(replyAnswerMessageContext, 'message_id');
-      const userReplyToMessageId = _.get(replyAnswerMessageContext, 'reply_to_message.message_id');
+      const replyMessageId = _.get(replyAnswerMessageContext, 'message_id');
+      const replyToMessageId = _.get(replyAnswerMessageContext, 'reply_to_message.message_id');
 
-      context.deleteMessage(userReplyMessageId).catch(console.log);
-      context.deleteMessage(userReplyToMessageId).catch(console.log);
+      context.deleteMessage(replyMessageId).catch(console.log);
+      context.deleteMessage(replyToMessageId).catch(console.log);
     },
     30000,
     ctx,
@@ -35,10 +35,11 @@ bot
     const newChatMemberId = _.get(newChatMember, 'id');
     const firstName = _.get(newChatMember, 'first_name', '');
     const lastName = _.get(newChatMember, 'last_name', '');
-    const user = _.get(ctx, 'from');
-    const userId = _.get(user, 'id');
-    const chat = _.get(ctx, 'chat');
-    const chatId = _.get(chat, 'id');
+    const userId = _.get(ctx, 'from.id');
+    const chatId = _.get(ctx, 'chat.id');
+    const title = _.get(ctx, 'chat.title');
+    const groupId = _.get(ctx, 'chat.username');
+
     const name = `${firstName} ${lastName}`.trim();
 
     if (userId === newChatMemberId) {
@@ -58,16 +59,6 @@ bot
             can_pin_messages: false,
           },
         },
-      );
-
-      const messages = await redis.smembers(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}:messages`);
-
-      await Promise.all(
-        messages
-          .filter(Boolean)
-          .map(
-            (messageId) => ctx.deleteMessage(messageId).catch(console.log),
-          ),
       );
 
       const formula = (
@@ -133,15 +124,16 @@ bot
           const hash = md5(`${dayjs().valueOf()}${_.random(0, 100)}`);
 
           return {
-            randomNumber: getRandomNumber(),
             hash,
+            randomNumber: getRandomNumber(),
           };
         });
 
       const answer = questions[_.random(0, questions.length - 1)];
 
       await redis.set(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}`, answer.hash);
-      const replyQuestionMessage = await ctx.replyWithPhoto(
+      const replyQuestionMessage = await ctx.telegram.sendPhoto(
+        userId,
         {
           source: await sharp(Buffer.from(captcha(answer.randomNumber.formula.join(' '))))
             .flatten({ background: '#ffffff' })
@@ -150,81 +142,73 @@ bot
             .toBuffer(),
         },
         {
-          reply_markup: Markup.inlineKeyboard(
-            [
+          reply_markup: {
+            inline_keyboard: [
               questions.map(
-                (question) => Markup.callbackButton(question.randomNumber.total, question.hash),
+                (question) => {
+                  const button = Markup.callbackButton(question.randomNumber.total, `${groupId}|${title}|${chatId}|${question.hash}`);
+
+                  return button;
+                },
               ),
               [
                 Markup.urlButton('💗 捐款給牧羊犬 💗', 'http://bit.ly/31POewi'),
               ],
             ],
-            {
-              columns: 2,
-            },
-          ),
-          caption: `👏 歡迎新使用者 ${name}，請在180秒內回答圖片的問題，否則牧羊犬會趕你出去喔 🐶`,
-          reply_to_message_id: ctx.message.message_id,
+          },
+
+          caption: `👏 歡迎新使用者 ${name} 加入 ${title}，請在180秒內回答圖片的問題，否則牧羊犬會把你吃了喔`,
         },
+      );
+
+      const messages = await redis.smembers(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}:messages`);
+
+      await Promise.all(
+        messages
+          .filter(Boolean)
+          .map(
+            (messageId) => ctx.deleteMessage(messageId).catch(console.log),
+          ),
       );
 
       await redis.set(`app:tg-captcha:chat:${chatId}:challenge:${replyQuestionMessage.message_id}`, userId);
 
       setTimeout(
-        (context, replyQuestionMessageContext) => async () => {
+        (context) => async () => {
           const requestUserId = _.get(context, 'message.new_chat_member.id');
           const requestChatId = _.get(context, 'chat.id');
-          const userQuestionReplyMessageId = _.get(replyQuestionMessageContext, 'message_id');
-
-          await context.deleteMessage(userQuestionReplyMessageId).catch(console.log);
           const hash = await redis.get(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`);
 
           if (hash) {
-            await context.kickChatMember(requestUserId);
-
-            const replyAnswerMessage = await context.reply(
-              '❌ 因為超過180秒回答，所以牧羊犬把你吃掉了',
-              {
-                reply_to_message_id: context.message.message_id,
-              },
+            await Promise.all(
+              [
+                context.kickChatMember(requestUserId),
+                context.reply('❌ 因為超過180秒回答，所以牧羊犬把你吃掉了'),
+                redis.del(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`),
+              ],
             );
-            await redis.del(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`);
-
-            handleDeleteMessage(context, replyAnswerMessage);
           }
         },
         180000,
         ctx,
-        replyQuestionMessage,
       );
     }
   })
   .action(/.+/, async (ctx) => {
     const userId = _.get(ctx, 'from.id');
-    const chatId = _.get(ctx, 'chat.id');
     const callback = _.get(ctx, 'update.callback_query.message');
     const messageId = _.get(callback, 'message_id');
-    const storedChallengeId = await redis.get(`app:tg-captcha:chat:${chatId}:challenge:${messageId}`);
-    const replyMessage = _.get(callback, 'reply_to_message');
-    const replyMessageId = _.get(replyMessage, 'message_id');
-    const challengeId = _.get(replyMessage, 'new_chat_member.id', _.toNumber(storedChallengeId));
-    const [inlineButton] = _.get(ctx, 'match', []);
+    const [inlineButton = ''] = _.get(ctx, 'match', []);
+    const [groupId, title, chatId, inlineAnswer] = inlineButton.split('|');
 
     let replyAnswerMessage = null;
 
     const captchaAnswer = await redis.get(`app:tg-captcha:chat:${chatId}:user:${userId}`);
 
-    if (userId !== challengeId) {
-      await ctx.answerCbQuery('這不是你的按鈕，請不要亂點 😠');
-    } else if (captchaAnswer === inlineButton) {
+    if (captchaAnswer === inlineAnswer) {
       await ctx.deleteMessage(messageId).catch(console.log);
 
-      replyAnswerMessage = await ctx.reply(
-        '⭕️ 恭喜回答正確，牧羊犬歡迎你的加入~',
-        {
-          reply_to_message_id: replyMessageId,
-        },
-      );
+      replyAnswerMessage = await ctx.reply(`⭕️ 恭喜回答正確，牧羊犬歡迎你的加入 ${title} 的大家庭~`);
 
       await ctx.telegram.callApi(
         'restrictChatMember',
@@ -246,20 +230,13 @@ bot
     } else {
       await ctx.deleteMessage(messageId).catch(console.log);
 
-      replyAnswerMessage = await ctx.reply(
-        '❌ 回答失敗，所以牧羊犬把你吃掉了',
-        {
-          reply_to_message_id: replyMessageId,
-        },
-      );
+      replyAnswerMessage = await ctx.reply(`❌ 回答失敗，所以牧羊犬把你吃掉了，如果需要解鎖，請透過 \`/admin @${groupId}\` 指令要求管理者進行解鎖`);
 
-      await ctx.kickChatMember(userId);
+      await ctx.telegram.kickChatMember(chatId, userId);
     }
 
     if (replyAnswerMessage) {
       await redis.del(`app:tg-captcha:chat:${chatId}:user:${userId}`);
-
-      handleDeleteMessage(ctx, replyAnswerMessage);
     }
   })
   .command('admin', async (ctx) => {
