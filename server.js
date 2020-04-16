@@ -10,23 +10,34 @@ const telegrafCommandParts = require('telegraf-command-parts');
 const redis = require('./redis');
 
 const { d } = genfun.formats;
+const bot = new Telegraf(process.env.BOT_TOKEN);
+const cache = {};
 
-const handleDeleteMessage = (ctx, replyAnswerMessage) => {
-  setTimeout(
-    (context, replyAnswerMessageContext) => () => {
-      const replyMessageId = _.get(replyAnswerMessageContext, 'message_id');
-      const replyToMessageId = _.get(replyAnswerMessageContext, 'reply_to_message.message_id');
+const DELAYED_SECONDS = 180;
 
-      context.deleteMessage(replyMessageId).catch(console.log);
-      context.deleteMessage(replyToMessageId).catch(console.log);
+const handleDeleteMessage = (message) => {
+  const chatId = _.get(message, 'chat.id');
+  const messageId = _.get(message, 'message_id');
+  const key = `${chatId}:${messageId}`;
+
+  if (cache[key]) {
+    clearTimeout(cache[key]);
+  }
+
+  cache[key] = setTimeout(
+    async (chatMessage) => {
+      await bot.telegram.deleteMessage(
+        ..._
+          .chain(chatMessage)
+          .pick(['chat.id', 'message_id'])
+          .values()
+          .value(),
+      );
     },
     30000,
-    ctx,
-    replyAnswerMessage,
+    message,
   );
 };
-
-const bot = new Telegraf(process.env.BOT_TOKEN);
 
 bot
   .use(telegrafCommandParts())
@@ -38,7 +49,6 @@ bot
     const userId = _.get(ctx, 'from.id');
     const chatId = _.get(ctx, 'chat.id');
     const title = _.get(ctx, 'chat.title');
-    const groupId = _.get(ctx, 'chat.username');
 
     const name = `${firstName} ${lastName}`.trim();
 
@@ -88,24 +98,17 @@ bot
           const getRandomNumber = () => {
             const randomNumber = Array(5)
               .fill()
-              .reduce(
-                (current, value, index) => {
-                  const operators = [
-                    '+',
-                    '-',
-                    '*',
-                  ];
+              .reduce((current, value, index) => {
+                const operators = ['+', '-', '*'];
 
-                  if (index % 2 === 0) {
-                    current.push(_.random(0, 99));
-                  } else {
-                    current.push(operators[_.random(0, operators.length - 1)]);
-                  }
+                if (index % 2 === 0) {
+                  current.push(_.random(0, 99));
+                } else {
+                  current.push(operators[_.random(0, operators.length - 1)]);
+                }
 
-                  return current;
-                },
-                [],
-              );
+                return current;
+              }, []);
 
             const total = formula(randomNumber)();
 
@@ -131,11 +134,24 @@ bot
 
       const answer = questions[_.random(0, questions.length - 1)];
 
-      await redis.set(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}`, answer.hash);
-      const replyQuestionMessage = await ctx.telegram.sendPhoto(
-        userId,
+      const messages = await redis.smembers(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}:messages`);
+
+      await Promise.all(
+        [
+          redis.setex(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}`, DELAYED_SECONDS, answer.hash),
+          ...messages
+            .map(
+              (message) => ctx
+                .deleteMessage(message)
+                .catch(console.log),
+            ),
+        ],
+      );
+
+      const image = Buffer.from(captcha(answer.randomNumber.formula.join(' ')));
+      const replyPhoto = await ctx.replyWithPhoto(
         {
-          source: await sharp(Buffer.from(captcha(answer.randomNumber.formula.join(' '))))
+          source: await sharp(image)
             .flatten({ background: '#ffffff' })
             .resize(800)
             .toFormat('jpg')
@@ -146,7 +162,7 @@ bot
             inline_keyboard: [
               questions.map(
                 (question) => {
-                  const button = Markup.callbackButton(question.randomNumber.total, `${groupId}|${title}|${chatId}|${question.hash}`);
+                  const button = Markup.callbackButton(question.randomNumber.total, `question|${answer.hash}`);
 
                   return button;
                 },
@@ -154,24 +170,18 @@ bot
               [
                 Markup.urlButton('💗 捐款給牧羊犬 💗', 'http://bit.ly/31POewi'),
               ],
+              [
+                Markup.callbackButton('💢 這個是spam 💢', `kick|${userId}`),
+              ],
             ],
           },
 
-          caption: `👏 歡迎新使用者 ${name} 加入 ${title}，請在180秒內回答圖片的問題，否則牧羊犬會把你吃了喔`,
+          caption: `👏 歡迎新使用者${name}加入${title}，請在${DELAYED_SECONDS}秒內回答圖片的問題，否則牧羊犬會把你吃了喔`,
+          reply_to_message_id: ctx.message.message_id,
         },
       );
 
-      const messages = await redis.smembers(`app:tg-captcha:chat:${chatId}:user:${newChatMemberId}:messages`);
-
-      await Promise.all(
-        messages
-          .filter(Boolean)
-          .map(
-            (messageId) => ctx.deleteMessage(messageId).catch(console.log),
-          ),
-      );
-
-      await redis.set(`app:tg-captcha:chat:${chatId}:challenge:${replyQuestionMessage.message_id}`, userId);
+      await redis.setex(`app:tg-captcha:chat:${chatId}:message:${replyPhoto.message_id}`, DELAYED_SECONDS, userId);
 
       setTimeout(
         (context) => async () => {
@@ -182,66 +192,98 @@ bot
           if (hash) {
             await Promise.all(
               [
-                context.kickChatMember(requestUserId),
-                context.reply('❌ 因為超過180秒回答，所以牧羊犬把你吃掉了'),
+                context.kickChatMember(requestUserId).catch(console.log),
+                context.reply(`❌ 因為超過${DELAYED_SECONDS}秒回答，所以牧羊犬把你吃掉了`),
                 redis.del(`app:tg-captcha:chat:${requestChatId}:user:${requestUserId}`),
               ],
             );
           }
         },
-        180000,
+        DELAYED_SECONDS * 1000,
         ctx,
       );
     }
   })
-  .action(/.+/, async (ctx) => {
+  .action(/question\|.+/, async (ctx) => {
     const userId = _.get(ctx, 'from.id');
+    const chatId = _.get(ctx, 'chat.id');
     const callback = _.get(ctx, 'update.callback_query.message');
     const messageId = _.get(callback, 'message_id');
-    const [inlineButton = ''] = _.get(ctx, 'match', []);
-    const [groupId, title, chatId, inlineAnswer] = inlineButton.split('|');
+    const inlineButton = _.get(ctx, 'match.0', '');
+    const [, inlineAnswer] = inlineButton.split('|');
+    const storedChallengeId = await redis.get(`app:tg-captcha:chat:${chatId}:message:${messageId}`);
+    const replyMessage = _.get(callback, 'reply_to_message');
+    const challengeId = _.get(replyMessage, 'new_chat_member.id', _.toNumber(storedChallengeId));
+    const challengeKey = `app:tg-captcha:chat:${ctx.chat.id}:user:${userId}`;
+    const answerKey = `app:tg-captcha:chat:${chatId}:user:${userId}`;
+    const captchaAnswer = await redis.get(challengeKey);
 
-    let replyAnswerMessage = null;
-
-    const captchaAnswer = await redis.get(`app:tg-captcha:chat:${chatId}:user:${userId}`);
-
-    if (captchaAnswer === inlineAnswer) {
-      await ctx.deleteMessage(messageId).catch(console.log);
-
-      replyAnswerMessage = await ctx.reply(`⭕️ 恭喜回答正確，牧羊犬歡迎你的加入 ${title} 的大家庭~`);
-
-      await ctx.telegram.callApi(
-        'restrictChatMember',
-        {
-          chat_id: chatId,
-          user_id: userId,
-          permissions: {
-            can_send_messages: true,
-            can_send_media_messages: true,
-            can_send_polls: true,
-            can_send_other_messages: true,
-            can_add_web_page_previews: true,
-            can_change_info: true,
-            can_invite_users: true,
-            can_pin_messages: true,
-          },
-        },
+    if (userId !== challengeId) {
+      await ctx.answerCbQuery('這不是你的按鈕，請不要亂點 😠');
+    } else if (captchaAnswer === inlineAnswer) {
+      await Promise.all(
+        [
+          redis.del(challengeKey),
+          redis.del(answerKey),
+          ctx.deleteMessage(messageId).catch(console.log),
+          ctx.reply(
+            '⭕️ 恭喜回答正確，牧羊犬歡迎你的加入~',
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    Markup.callbackButton('💢 這個是spam 💢', `kick|${userId}}`),
+                  ],
+                ],
+              },
+              reply_to_message_id: ctx.reply_to_message.message_id,
+            },
+          ).then(handleDeleteMessage),
+          ctx.telegram.callApi(
+            'restrictChatMember',
+            {
+              chat_id: chatId,
+              user_id: userId,
+              permissions: {
+                can_send_messages: true,
+                can_send_media_messages: true,
+                can_send_polls: true,
+                can_send_other_messages: true,
+                can_add_web_page_previews: true,
+                can_change_info: true,
+                can_invite_users: true,
+                can_pin_messages: true,
+              },
+            },
+          ),
+        ],
       );
     } else {
-      await ctx.deleteMessage(messageId).catch(console.log);
-
-      replyAnswerMessage = await ctx.reply(`❌ 回答失敗，所以牧羊犬把你吃掉了，如果需要解鎖，請透過 \`/admin @${groupId}\` 指令要求管理者進行解鎖`);
-
-      await ctx.telegram.kickChatMember(chatId, userId);
-    }
-
-    if (replyAnswerMessage) {
-      await redis.del(`app:tg-captcha:chat:${chatId}:user:${userId}`);
+      await Promise.all(
+        [
+          redis.del(challengeKey),
+          redis.del(answerKey),
+          ctx.deleteMessage(messageId).catch(console.log),
+          ctx.reply(
+            '❌ 回答失敗，所以牧羊犬把你吃掉了',
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    Markup.callbackButton('🥺 不小心誤殺了 🥺', `unban|${userId}`),
+                  ],
+                ],
+              },
+              reply_to_message_id: ctx.reply_to_message.message_id,
+            },
+          ).then(handleDeleteMessage),
+          ctx.kickChatMember(userId),
+        ],
+      );
     }
   })
   .command('admin', async (ctx) => {
-    const [group] = _.get(ctx, 'state.command.splitArgs', []);
-
+    const group = _.get(ctx, 'state.command.splitArgs.0', ctx.chat.id);
     const admins = await ctx.telegram.getChatAdministrators(group);
 
     const groupAdmins = admins
@@ -274,9 +316,10 @@ Chung Wu`);
     const text = _.get(ctx, 'message.text');
     const messageId = _.get(ctx, 'message.message_id');
     const chatId = _.get(ctx, 'chat.id');
-    const key = `app:tg-captcha:chat:${chatId}:user:${userId}:messages`;
 
     if (text) {
+      const key = `app:tg-captcha:chat:${chatId}:user:${userId}:messages`;
+
       await redis
         .pipeline()
         .sadd(key, messageId)
@@ -288,68 +331,108 @@ Chung Wu`);
   })
   .on('message', async (ctx, next) => {
     const admins = await ctx.getChatAdministrators();
-    const adminId = admins.map((admin) => admin.user.id);
+    const adminId = _.map(admins, 'user.id');
 
     if (adminId.includes(ctx.from.id)) {
       await next();
     }
   })
   .command('ban', async (ctx) => {
-    const [muteMinutes = 0] = _.get(ctx, 'state.command.splitArgs', []);
+    const muteMinutes = _.get(ctx, 'state.command.splitArgs.0', 0);
+    const userId = _.get(ctx, 'message.reply_to_message.from.id');
     const minutes = _.toInteger(muteMinutes);
 
-    const userId = _.get(ctx, 'message.reply_to_message.from.id');
-
     if (userId) {
-      await ctx.kickChatMember(
-        userId,
-        Math.round(dayjs().add(minutes, 'minute').valueOf() / 1000),
-      );
-
       const firstName = _.get(ctx, 'message.reply_to_message.from.first_name', '');
       const lastName = _.get(ctx, 'message.reply_to_message.from.last_name', '');
 
-      await ctx.reply(`已經將${firstName} ${lastName}${minutes === 0 ? '封鎖' : `封鎖 ${minutes} 分鐘`}`);
+      await Promise.all(
+        [
+          ctx.kickChatMember(userId, Math.round(dayjs().add(minutes, 'minute').valueOf() / 1000)),
+          ctx.reply(
+            `已經將${firstName} ${lastName}${minutes === 0 ? '封鎖' : `封鎖${minutes}分鐘`}`,
+            {
+              reply_to_message_id: ctx.message.reply_to_message.message_id,
+            },
+          ),
+        ],
+      );
     } else {
-      const message = await ctx.reply('請利用回覆的方式指定要封鎖的人');
-
-      handleDeleteMessage(ctx, message);
+      await ctx.reply(
+        '請利用回覆的方式指定要封鎖的人',
+        {
+          reply_to_message_id: ctx.message.reply_to_message.message_id,
+        },
+      );
     }
   })
   .command('mute', async (ctx) => {
-    const [muteMinutes = 5] = _.get(ctx, 'state.command.splitArgs', []);
+    const muteMinutes = _.get(ctx, 'state.command.splitArgs.0', 5);
+    const userId = _.get(ctx, 'message.reply_to_message.from.id');
     const minutes = _.toInteger(muteMinutes);
 
-    const userId = _.get(ctx, 'message.reply_to_message.from.id');
-
     if (userId) {
-      await ctx.telegram.callApi(
-        'restrictChatMember',
-        {
-          chat_id: ctx.chat.id,
-          user_id: userId,
-          permissions: {
-            can_send_messages: false,
-            can_send_media_messages: false,
-            can_send_polls: false,
-            can_send_other_messages: false,
-            can_add_web_page_previews: false,
-            can_change_info: false,
-            can_invite_users: false,
-            can_pin_messages: false,
-          },
-          until_date: Math.round(dayjs().add(minutes, 'minute').valueOf() / 1000),
-        },
-      );
       const firstName = _.get(ctx, 'message.reply_to_message.from.first_name', '');
       const lastName = _.get(ctx, 'message.reply_to_message.from.last_name', '');
 
-      await ctx.reply(`已經將${firstName} ${lastName}${minutes === 0 ? '禁言' : `禁言${minutes}分鐘`}`);
+      await Promise.all(
+        [
+          ctx.telegram.callApi(
+            'restrictChatMember',
+            {
+              chat_id: ctx.chat.id,
+              user_id: userId,
+              permissions: {
+                can_send_messages: false,
+                can_send_media_messages: false,
+                can_send_polls: false,
+                can_send_other_messages: false,
+                can_add_web_page_previews: false,
+                can_change_info: false,
+                can_invite_users: false,
+                can_pin_messages: false,
+              },
+              until_date: Math.round(dayjs().add(minutes, 'minute').valueOf() / 1000),
+            },
+          ),
+          ctx.reply(
+            `已經將${firstName} ${lastName}${minutes === 0 ? '禁言' : `禁言${minutes}分鐘`}`,
+            {
+              reply_to_message_id: ctx.message.reply_to_message.message_id,
+            },
+          ),
+        ],
+      );
     } else {
-      const message = await ctx.reply('請利用回覆的方式指定要禁言的人');
-
-      handleDeleteMessage(ctx, message);
+      await ctx.reply(
+        '請利用回覆的方式指定要禁言的人',
+        {
+          reply_to_message_id: ctx.message.reply_to_message.message_id,
+        },
+      );
     }
+  })
+  .action(/unban\|.+/, async (ctx) => {
+    const inlineButton = _.get(ctx, 'match.0', '');
+    const [, userId] = inlineButton.split('|');
+
+    await Promise.all(
+      [
+        ctx.editMessageText('牧羊犬已經解除他的封鎖了喔 🐶').then(handleDeleteMessage),
+        ctx.unbanChatMember(userId),
+      ],
+    );
+  })
+  .action(/kick\|.+/, async (ctx) => {
+    const inlineButton = _.get(ctx, 'match.0', '');
+    const [, userId] = inlineButton.split('|');
+
+    await Promise.all(
+      [
+        ctx.editMessageText('牧羊犬已經把他趕走了哦 🐶').then(handleDeleteMessage),
+        ctx.kickChatMember(userId),
+      ],
+    );
   })
   .catch(console.log)
   .launch();
