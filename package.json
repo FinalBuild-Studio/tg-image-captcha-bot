@@ -6,7 +6,7 @@
 		"dayjs": "^1.8.15",
 		"generate-function": "^2.3.1",
 		"ioredis": "^4.14.0",
-		"lodash": "^4.17.15",
+		"lodash": "^4.17.21",
 		"md5": "^2.2.1",
 		"sharp": "^0.23.0",
 		"svg-captcha": "^1.4.0",
