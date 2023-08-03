@@ -8,7 +8,7 @@
 		"ioredis": "^4.14.0",
 		"lodash": "^4.17.15",
 		"md5": "^2.2.1",
-		"sharp": "^0.23.0",
+		"sharp": "^0.30.5",
 		"svg-captcha": "^1.4.0",
 		"telegraf": "^3.32.0",
 		"telegraf-command-parts": "^1.0.3"
